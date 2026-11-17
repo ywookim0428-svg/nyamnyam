@@ -393,6 +393,7 @@ th{color:var(--muted);font-weight:400;font-size:13px}
         <div><button class="p-btn" id="micTest">마이크 확인하기</button></div>
       </div>
       <div class="notice">
+        냠냠이 목소리는 ElevenLabs로 만든 음성입니다.<br>
         이 앱은 연습 놀이 도구입니다. 판정은 부모님이 직접 하고, 녹음은 이 기기 안에만 저장됩니다.
         말소리 문제가 걱정되시면 언어치료사의 평가를 함께 받아보세요.
       </div>
@@ -497,6 +498,7 @@ function onsets(word){ return [...word].map(ch=>{const c=ch.charCodeAt(0)-0xAC00
 function hasJong(word){ const c=word.charCodeAt(word.length-1)-0xAC00; return c>=0&&c<=11171&&c%28!==0; }
 const callName = () => S.name + (hasJong(S.name)?'아':'야');      // 지안아 / 서아야
 const subjName = () => S.name + (hasJong(S.name)?'이':'');        // 지안이 / 서아
+const eul = w => w + (hasJong(w)?'을':'를');                       // 왕관을 / 무지개를
 function toast(msg){ const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),2200); }
 const todayKey = (t=Date.now()) => { const d=new Date(t); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
 
@@ -551,7 +553,7 @@ function allWords(){ return BUILTIN.concat(S.custom.map(c=>({id:c.id, word:c.wor
 
 /* ================= audio ================= */
 let AC = null;
-function ac(){ if(!AC){ try{ AC = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if (AC && AC.state==='suspended') AC.resume(); return AC; }
+function ac(){ if(!AC){ try{ AC = new (window.AudioContext||window.webkitAudioContext)(); const b=AC.createBuffer(1,1,22050), src=AC.createBufferSource(); src.buffer=b; src.connect(AC.destination); src.start(0); }catch(e){} } if (AC && AC.state==='suspended') AC.resume(); return AC; }
 function tone(freq, start, dur, type='sine', vol=.18){
   const a=ac(); if(!a) return;
   const o=a.createOscillator(), g=a.createGain(); o.type=type; o.frequency.setValueAtTime(freq,a.currentTime+start);
@@ -570,11 +572,11 @@ const SFX = {
 let koVoice = null;
 function pickVoice(){ const vs = speechSynthesis.getVoices(); koVoice = vs.find(v=>/ko[-_]KR/i.test(v.lang) && /yuna|유나|siri/i.test(v.name)) || vs.find(v=>/^ko/i.test(v.lang)) || null; }
 if ('speechSynthesis' in window){ pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
-function say(text,{rate=.95,pitch=1.25}={}){
+function tts(text,{rate=.95,pitch=1}={}){
   return new Promise(res=>{
     if (!('speechSynthesis' in window)) return res();
     try{
-      speechSynthesis.cancel();
+      stopAudio(); speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text); u.lang='ko-KR'; if(koVoice) u.voice=koVoice; u.rate=rate; u.pitch=pitch;
       let done=false; const fin=()=>{ if(!done){done=true;res();} };
       u.onend=fin; u.onerror=fin; setTimeout(fin, 1200 + text.length*260/rate);
@@ -582,24 +584,61 @@ function say(text,{rate=.95,pitch=1.25}={}){
     }catch(e){ res(); }
   });
 }
-let curAudio = null;
-function playBlob(blob,{rate=1,cute=false}={}){
+/* Pre-made natural voice files (voice/index.json: key -> file).
+   keys: "w:<word>" normal, "ws:<word>" slow, "p:<sentence>" spoken lines */
+let VOICE = {};
+async function loadVoice(){ try{ const r = await fetch('voice/index.json'); if (r.ok) VOICE = await r.json(); }catch(e){} }
+const bufCache = new Map();
+let curSrc = null, curAudio = null;
+function stopAudio(){ try{ curSrc && curSrc.stop(); }catch(e){} curSrc=null; if (curAudio){ curAudio.pause(); curAudio=null; } }
+async function decode(arrayBuf){
+  const a = ac(); if (!a) throw new Error('no audio');
+  return await new Promise((res,rej)=>{ const p = a.decodeAudioData(arrayBuf, res, rej); if (p && p.then) p.then(res,rej); });
+}
+function playBuffer(buf, rate=1){
   return new Promise(res=>{
-    if(!blob) return res();
+    const a = ac(); stopAudio();
+    const src = a.createBufferSource(); src.buffer = buf; src.playbackRate.value = rate;
+    src.connect(a.destination); curSrc = src;
+    let done=false; const fin=()=>{ if(!done){done=true; res();} };
+    src.onended = fin; setTimeout(fin, buf.duration/rate*1000 + 800);
+    src.start();
+  });
+}
+function playElement(blob, rate){
+  return new Promise(res=>{
     try{
-      if(curAudio){ curAudio.pause(); }
-      const url = URL.createObjectURL(blob); const a = new Audio(url); curAudio=a;
-      a.playbackRate = rate; if (cute){ a.preservesPitch=false; a.webkitPreservesPitch=false; a.playbackRate=1.18; }
+      stopAudio();
+      const url = URL.createObjectURL(blob); const a = new Audio(url); curAudio=a; a.playbackRate = rate;
       let done=false; const fin=()=>{ if(!done){done=true; URL.revokeObjectURL(url); res();} };
-      a.onended=fin; a.onerror=fin; setTimeout(fin, 9000);
-      a.play().catch(fin);
+      a.onended=fin; a.onerror=fin; setTimeout(fin, 9000); a.play().catch(fin);
     }catch(e){ res(); }
   });
 }
+async function playUrl(url, rate=1){
+  try{
+    let buf = bufCache.get(url);
+    if (!buf){ const r = await fetch(url); if (!r.ok) return false; buf = await decode(await r.arrayBuffer()); bufCache.set(url, buf); }
+    if ('speechSynthesis' in window) speechSynthesis.cancel();
+    await playBuffer(buf, rate); return true;
+  }catch(e){ return false; }
+}
+async function playBlob(blob,{rate=1,cute=false}={}){
+  if(!blob) return;
+  const r = cute ? 1.18 : rate;   // cute = the fairy repeats the child in a higher voice
+  try{ const buf = await decode(await blob.arrayBuffer()); return await playBuffer(buf, r); }
+  catch(e){ return playElement(blob, r); }
+}
+async function say(text, opts){
+  if (VOICE['p:'+text] && await playUrl(VOICE['p:'+text])) return;
+  return tts(text, opts);
+}
 async function sayWord(w, slow=false){
   const key = S.models[w.id];
-  if (key){ const b = await DB.get('blobs', key); if (b) return playBlob(b,{rate: slow?.75:1}); }
-  return say(w.word,{rate: slow?.5:.75, pitch:1.1});
+  if (key){ const b = await DB.get('blobs', key); if (b) return playBlob(b,{rate: slow?.8:1}); }
+  const f = VOICE[(slow?'ws:':'w:')+w.word];
+  if (f && await playUrl(f)) return;
+  return tts(w.word,{rate: slow?.5:.75, pitch:1});
 }
 async function cheerVoice(text){
   if (S.cheers.length && Math.random()<.7){ const b = await DB.get('blobs', pickOne(S.cheers).key); if (b) return playBlob(b); }
@@ -708,7 +747,7 @@ function show(id){
   if (id==='parent') renderParent();
   if (id!=='play'){ Mic.release(); releaseWake(); }
 }
-document.addEventListener('click', e=>{ const g=e.target.closest('[data-go]'); if(g){ speechSynthesis.cancel(); show(g.dataset.go); } });
+document.addEventListener('click', e=>{ const g=e.target.closest('[data-go]'); if(g){ stopAudio(); speechSynthesis.cancel(); show(g.dataset.go); } });
 
 function renderHome(){
   $('#hello').textContent = callName()+', 놀자!';
@@ -716,7 +755,7 @@ function renderHome(){
   for (let i=0;i<10;i++){ const d=document.createElement('div'); d.className='slot'+(S.stickers[i]?' on':''); d.textContent=S.stickers[i]||''; b.appendChild(d); }
   const left = 10 - S.stickers.length;
   const next = ['리본','왕관','반짝 요술봉','무지개'][Math.min(3,S.level)];
-  $('#boardCap').textContent = S.level>=4 && left===10 ? `스티커 ${S.totalStickers}개 모았어!` : `스티커 ${left}개 더 모으면 냠냠이가 ${next}을 받아요`;
+  $('#boardCap').textContent = S.level>=4 && left===10 ? `스티커 ${S.totalStickers}개 모았어!` : `스티커 ${left}개 더 모으면 냠냠이가 ${eul(next)} 받아요`;
   mood(fairies.homeFairy, null);
 }
 
@@ -825,7 +864,7 @@ $('#micBtn').onclick = async () => {
   if (phase==='rec'){ manual.fn && manual.fn(); return; }  // tap again = done talking
   if (phase!=='ready') return;
   const w = SES.words[SES.i], f = fairies.playFairy;
-  speechSynthesis.cancel();
+  stopAudio(); speechSynthesis.cancel();
   phase='rec';
   let res = {blob:null, voiced:true};
   const micOK = (Mic.state!=='denied' && Mic.state!=='none') ? await Mic.ensure() : false;
@@ -902,7 +941,7 @@ async function decide(kind){
   if (SES.i >= SES.words.length) return endSession();
   presentWord();
 }
-$('#quitBtn').onclick = () => { clearTimeout(judgeTimer); speechSynthesis.cancel(); phase='idle'; if (SES && SES.eaten.length) endSession(); else show('home'); };
+$('#quitBtn').onclick = () => { clearTimeout(judgeTimer); stopAudio(); speechSynthesis.cancel(); phase='idle'; if (SES && SES.eaten.length) endSession(); else show('home'); };
 
 function pruneRecs(){
   const withRec = LOG.filter(l=>l.rec);
@@ -935,8 +974,8 @@ async function takeSticker(s){
   $('#pickWrap').hidden=true;
   if (levelUp){
     const gift = ['리본','왕관','반짝 요술봉','무지개'][Math.min(3,S.level-1)];
-    $('#endTitle').textContent = `스티커판 완성! 냠냠이가 ${gift}을 받았어!`;
-    await say(`우와! 스티커판을 다 채웠어! 냠냠이가 ${gift}을 받았어!`);
+    $('#endTitle').textContent = `스티커판 완성! 냠냠이가 ${eul(gift)} 받았어!`;
+    await say(`우와! 스티커판을 다 채웠어! 냠냠이가 ${eul(gift)} 받았어!`);
   }
   const r=$('#replay'); r.innerHTML='';
   for (const it of SES.eaten){
@@ -1098,7 +1137,7 @@ function renderLog(){
 /* ================= boot ================= */
 (async function boot(){
   mountFairy('homeFairy'); mountFairy('playFairy'); mountFairy('endFairy');
-  await loadState(); setLevelAll(); renderHome();
+  await loadState(); setLevelAll(); renderHome(); loadVoice();
   if ('serviceWorker' in navigator && location.protocol==='https:'){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
 })();
 </script>
