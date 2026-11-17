@@ -143,7 +143,12 @@ h1,h2,h3,.disp{font-family:var(--display);font-weight:400;margin:0;text-wrap:bal
 .listen-btn{position:absolute;top:14px;right:14px;width:64px;height:64px;border-radius:50%;background:var(--mint-soft);font-size:32px;border:3px solid var(--mint)}
 .side{display:flex;flex-direction:column;align-items:center;gap:6px;width:100%;min-height:0}
 .side .fairy{max-width:min(320px,34vh)}
-.controls{display:flex;justify-content:center;align-items:flex-start;min-height:170px;padding-top:6px;position:relative}
+.controls{display:flex;justify-content:center;align-items:flex-start;gap:clamp(24px,5vw,56px);min-height:190px;padding-top:6px;position:relative}
+.mirror{width:170px;height:170px;border-radius:50%;overflow:hidden;position:relative;border:6px solid var(--pink-soft);background:var(--card);flex:none;transition:border-color .2s,box-shadow .2s}
+.mirror video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1);display:block}
+.mirror .tag{position:absolute;left:50%;bottom:6px;transform:translateX(-50%);background:rgba(255,255,255,.85);border-radius:999px;padding:1px 10px;font-family:var(--display);font-size:15px}
+.mirror.rec{border-color:var(--mint);box-shadow:0 0 0 8px rgba(111,211,189,.35)}
+.mirror.watch{border-color:var(--butter)}
 .mic-btn{
   width:120px;height:120px;border-radius:50%;background:var(--pink);color:#fff;
   font-size:56px;box-shadow:0 8px 0 var(--pink-deep);position:relative;
@@ -169,12 +174,14 @@ h1,h2,h3,.disp{font-family:var(--display);font-weight:400;margin:0;text-wrap:bal
 .judge .timer{height:4px;background:var(--line);border-radius:2px;overflow:hidden}
 .judge .timer i{display:block;height:100%;background:var(--muted);width:100%;transform-origin:left}
 .judge .tip{color:var(--ink);font-size:13px;line-height:1.4}
+.judge .heard{color:var(--ink);font-size:14px;line-height:1.4;background:var(--mint-soft);border-radius:10px;padding:6px 8px}
 
 @media (orientation:portrait){
   .stage{grid-template-columns:1fr;grid-template-rows:auto auto}
   .word-card{width:min(78vw,380px);aspect-ratio:1.1}
   .side .fairy{max-width:min(220px,24vh)}
   .judge{width:min(340px,70vw)}
+  .mirror{width:150px;height:150px}
 }
 
 /* ---------- end ---------- */
@@ -321,10 +328,12 @@ th{color:var(--muted);font-weight:400;font-size:13px}
     </div>
   </div>
   <div class="controls">
+    <div class="mirror" id="mirror" hidden><video id="mirrorVid" playsinline muted autoplay></video><span class="tag">거울</span></div>
     <button class="mic-btn" id="micBtn" disabled aria-label="말하기"><span class="ring" id="micRing"></span>🎤<span class="lbl" id="micLbl">말하기</span></button>
   </div>
   <div class="judge" id="judge" hidden>
     <div>부모님만 눌러 주세요</div>
+    <div class="heard" id="heard" hidden></div>
     <div class="tip" id="tip" hidden></div>
     <div class="row">
       <button class="star" id="jStar">⭐ 잘했어</button>
@@ -386,6 +395,18 @@ th{color:var(--muted);font-weight:400;font-size:13px}
       <div class="panel">
         <h3>한 판의 단어 수</h3>
         <div class="seg" id="countSeg"></div>
+      </div>
+      <div class="panel">
+        <h3>자동 판정 (실험)</h3>
+        <p class="hint">아이가 말하면 아이패드 음성 인식이 들은 말을 단어와 비교합니다. 맞으면 자동으로 ⭐, 연습 단어인데 다른 말로 들리면 "한 번 더"를 한 번만 하고, 애매하면 칭찬하고 넘어갑니다. 판정 패널에 "들린 말"이 보이고, 3.5초 안에 부모님이 다른 버튼을 누르면 그 판정이 우선합니다.</p>
+        <p class="hint">음성 인식은 아는 단어로 "고쳐 듣는" 경향이 있어서 "따과"를 "사과"로 들을 수 있습니다. 대략적인 도우미로만 써 주세요. 아이패드에서는 설정 → 일반 → 키보드 → "받아쓰기 활성화"가 켜져 있어야 하고, 인식할 때 음성이 Apple 서버로 전송될 수 있습니다.</p>
+        <div class="seg" id="autoSeg"></div>
+        <p class="hint" id="autoStatus"></p>
+      </div>
+      <div class="panel">
+        <h3>거울 (앞 카메라)</h3>
+        <p class="hint">놀이 화면에 아이 얼굴이 거울처럼 보여서 입 모양을 보며 따라 할 수 있어요. 화면에만 보이고 녹화나 저장은 하지 않습니다. 처음 켤 때 카메라 허용을 물어봅니다.</p>
+        <div class="seg" id="mirrorSeg"></div>
       </div>
       <div class="panel" id="micPanel">
         <h3>마이크</h3>
@@ -540,7 +561,7 @@ const DB = (() => {
 
 /* ================= state ================= */
 const DEFAULTS = { name:'지안', focus:['ㄷ','ㅅ'], hard:['ㅅ','ㅆ','ㄷ','ㄸ','ㅈ','ㅉ','ㅊ','ㄲ','ㅃ'], count:8,
-  stickers:[], level:0, totalStickers:0, custom:[], cheers:[], models:{}, recent:[] };
+  autoJudge:true, mirror:true, stickers:[], level:0, totalStickers:0, custom:[], cheers:[], models:{}, recent:[] };
 let S = structuredClone(DEFAULTS);
 let LOG = [];   // {id,t,word,wid,onsets,target,attempt,judge,rec}
 async function loadState(){
@@ -691,6 +712,44 @@ const Mic = {
   }
 };
 
+/* ================= mirror camera ================= */
+const Cam = {
+  stream:null,
+  async start(){
+    const box = $('#mirror');
+    if (!S.mirror || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ box.hidden = true; return; }
+    try{
+      if (!this.stream || !this.stream.active)
+        this.stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user', width:{ideal:480}, height:{ideal:480}}, audio:false});
+      const v = $('#mirrorVid'); v.srcObject = this.stream; box.hidden = false; v.play().catch(()=>{});
+    }catch(e){ box.hidden = true; }
+  },
+  release(){ if (this.stream){ this.stream.getTracks().forEach(t=>t.stop()); this.stream=null; } const v=$('#mirrorVid'); if (v) v.srcObject=null; }
+};
+function mirrorMode(m){ const b=$('#mirror'); b.classList.remove('rec','watch'); if (m) b.classList.add(m); }
+
+/* ================= auto judge: on-device speech recognition ================= */
+const Recog = {
+  Ctor: window.SpeechRecognition || window.webkitSpeechRecognition || null,
+  blocked: false,
+  get usable(){ return !!this.Ctor && S.autoJudge && !this.blocked; },
+  /* starts listening; returns {stop, result} where result resolves to an array of heard phrases, or null if unavailable */
+  start(){
+    if (!this.usable) return null;
+    let r; try{ r = new this.Ctor(); }catch(e){ return null; }
+    r.lang = 'ko-KR'; r.interimResults = false; r.maxAlternatives = 5; r.continuous = false;
+    const alts = []; let done, settled = false;
+    const result = new Promise(res => { done = v => { if (!settled){ settled = true; res(v); } }; });
+    r.onresult = e => { for (const res of e.results) for (let i=0;i<res.length;i++) if (res[i].transcript) alts.push(res[i].transcript.trim()); };
+    r.onerror = e => { if (e.error==='not-allowed' || e.error==='service-not-allowed'){ this.blocked = true; done(null); } };
+    r.onend = () => done(alts);
+    try{ r.start(); }catch(e){ done(null); }
+    return { result, stop(){ try{ r.stop(); }catch(e){} setTimeout(()=>done(alts), 2500); } };
+  }
+};
+const normKo = t => (t||'').replace(/[^가-힣A-Za-z0-9]/g,'');
+function heardMatches(alts, word){ const w = normKo(word); return alts.some(a => normKo(a).includes(w)); }
+
 /* ================= fairy helpers ================= */
 const fairies = {};
 function mountFairy(slotId){
@@ -745,7 +804,7 @@ function show(id){
   document.querySelectorAll('.screen').forEach(s=>s.hidden = s.id!==id);
   if (id==='home') renderHome();
   if (id==='parent') renderParent();
-  if (id!=='play'){ Mic.release(); releaseWake(); }
+  if (id!=='play'){ Mic.release(); Cam.release(); releaseWake(); }
 }
 document.addEventListener('click', e=>{ const g=e.target.closest('[data-go]'); if(g){ stopAudio(); speechSynthesis.cancel(); show(g.dataset.go); } });
 
@@ -819,7 +878,7 @@ function releaseWake(){ try{ wake && wake.release(); }catch(e){} wake=null; }
 
 async function startSession(themeId){
   SES = { theme:themeId, words:buildSession(themeId), i:0, attempt:0, eaten:[], stars:0 };
-  show('play'); requestWake();
+  show('play'); requestWake(); Cam.start();
   const h = $('#hearts'); h.innerHTML=''; SES.words.forEach(()=>{ const s=document.createElement('span'); s.textContent='💖'; h.appendChild(s); });
   setLevelAll();
   await sleep(500);
@@ -844,14 +903,14 @@ function bubble(t){ $('#bubble').textContent = t; }
 
 async function presentWord(){
   const w = SES.words[SES.i], f = fairies.playFairy;
-  SES.attempt = 0;
+  SES.attempt = 0; SES.autoRetried = false;
   $('#judge').hidden = true;
   const card = $('#wordCard'); card.classList.remove('pop'); void card.offsetWidth; card.classList.add('pop');
   $('#wordPic').innerHTML = await picFor(w);
   $('#wordText').innerHTML = hl(w.word);
   phase='model'; setMic('off');
   bubble(pickOne([`${w.word} 줄래?`,`${w.word} 먹고 싶어!`,`${w.word} 주세요~`]));
-  talk(f,true); await sayWord(w); talk(f,false);
+  mirrorMode('watch'); talk(f,true); await sayWord(w); talk(f,false); mirrorMode(null);
   phase='ready'; setMic('ready');
 }
 $('#listenBtn').onclick = async () => {
@@ -867,12 +926,14 @@ $('#micBtn').onclick = async () => {
   stopAudio(); speechSynthesis.cancel();
   phase='rec';
   let res = {blob:null, voiced:true};
+  const recog = Recog.start();            // start in the tap itself (Safari needs a user gesture)
   const micOK = (Mic.state!=='denied' && Mic.state!=='none') ? await Mic.ensure() : false;
   if (micOK){
-    setMic('rec'); mood(f,'listen'); bubble('냠냠이가 듣고 있어…');
+    setMic('rec'); mood(f,'listen'); bubble('냠냠이가 듣고 있어…'); mirrorMode('rec');
     const ring = $('#micRing');
     res = await Mic.record({manualStop:manual, onLevel:lv=>{ mouth(f,lv); ring.style.transform=`scale(${1+lv*.35})`; }});
-    ring.style.transform=''; manual.fn=null; mood(f,null); mouth(f,0);
+    ring.style.transform=''; manual.fn=null; mood(f,null); mouth(f,0); mirrorMode(null);
+    recog && recog.stop();
     if (!res.voiced){
       phase='ready'; setMic('ready');
       bubble('냠냠이가 기다리고 있어~');
@@ -887,33 +948,50 @@ $('#micBtn').onclick = async () => {
   await sleep(500);
   if (res.blob){ talk(f,true); await playBlob(res.blob,{cute:true}); talk(f,false); }
   SES.lastBlob = res.blob;
-  showJudge(w);
+  if (!micOK) recog && recog.stop();
+  const alts = recog ? await recog.result : null;
+  showJudge(w, alts);
 };
 
-let judgeTimer=null, judgeAnim=null;
-function showJudge(w){
+let judgeTimer=null;
+function showJudge(w, alts){
   phase='judge';
   const j=$('#judge'); j.hidden=false;
   const tipSounds = [...new Set(onsets(w.word).filter(o=>S.focus.includes(o)))];
   const tip=$('#tip'); tip.hidden = !w.target; tip.textContent = tipSounds.map(s=>TIPS[s]).filter(Boolean).join(' ');
   $('#jMore').textContent = SES.attempt>=3 ? '➡️ 다음으로' : '🍴 한 번 더';
   bubble(pickOne(['냠냠, 맛있다!','우와, 크게 말해줬네!','고마워!','냠냠냠~']));
+  // automatic verdict from speech recognition (null = not available → parent judges, else gentle default)
+  let verdict = 'none', WAIT = 6000;
+  const hb = $('#heard');
+  SES.heard = alts && alts.length ? alts[0] : '';
+  if (alts){
+    WAIT = 3500;
+    const match = heardMatches(alts, w.word);
+    if (match) verdict = 'star';
+    else if (alts.length && w.target && !SES.autoRetried) verdict = SES.attempt>=3 ? 'enough' : 'more';
+    const label = {star:'⭐ 잘했어', more:'🍴 한 번 더', enough:'다음으로', none:'칭찬하고 넘어가기'}[verdict];
+    hb.hidden = false;
+    hb.textContent = (alts.length ? `들린 말: "${alts[0]}"` : '들린 말: (알아듣지 못함)') + ` → 자동: ${label}`;
+  } else hb.hidden = true;
+  SES.autoVerdict = alts ? verdict : null;
   const bar=$('#jTimer'); bar.style.transition='none'; bar.style.transform='scaleX(1)'; void bar.offsetWidth;
-  const WAIT=6000; bar.style.transition=`transform ${WAIT}ms linear`; bar.style.transform='scaleX(0)';
-  clearTimeout(judgeTimer); judgeTimer=setTimeout(()=>decide('none'), WAIT);
+  bar.style.transition=`transform ${WAIT}ms linear`; bar.style.transform='scaleX(0)';
+  clearTimeout(judgeTimer); judgeTimer=setTimeout(()=>decide(verdict, true), WAIT);
 }
 $('#jStar').onclick = () => decide('star');
 $('#jMore').onclick = () => decide(SES.attempt>=3 ? 'enough' : 'more');
 
-async function decide(kind){
+async function decide(kind, auto=false){
   if (phase!=='judge') return;
+  if (auto && kind==='more') SES.autoRetried = true;
   clearTimeout(judgeTimer); $('#judge').hidden=true; phase='react';
   const w = SES.words[SES.i], f = fairies.playFairy;
   // log + keep recording
   const id = Date.now().toString(36)+Math.random().toString(36).slice(2,6);
   let recKey = null;
   if (SES.lastBlob){ recKey='rec:'+id; await DB.set('blobs', recKey, SES.lastBlob); }
-  LOG.push({id, t:Date.now(), word:w.word, wid:w.id, onsets:onsets(w.word).filter(Boolean), target:w.target, attempt:SES.attempt, judge: kind==='enough'?'more':kind, rec:recKey});
+  LOG.push({id, t:Date.now(), word:w.word, wid:w.id, onsets:onsets(w.word).filter(Boolean), target:w.target, attempt:SES.attempt, judge: kind==='enough'?'more':kind, rec:recKey, heard:SES.heard||'', auto:!!auto && SES.autoVerdict!==null});
   pruneRecs(); save();
   if (kind==='more'){
     mood(f,'happy',1600); SFX.soft();
@@ -1009,6 +1087,12 @@ function renderParent(){
   });
   const seg=$('#countSeg'); seg.innerHTML='';
   for (const n of [6,8,10]){ const b=document.createElement('button'); b.className='chip'; b.textContent=n+'개'; b.setAttribute('aria-pressed', S.count===n); b.onclick=()=>{S.count=n; save(); renderParent();}; seg.appendChild(b); }
+  const onoff = (box, key, after) => { box.innerHTML=''; for (const [v,lab] of [[true,'켜기'],[false,'끄기']]){ const b=document.createElement('button'); b.className='chip'; b.style.fontSize='18px'; b.textContent=lab; b.setAttribute('aria-pressed', S[key]===v); b.onclick=()=>{ S[key]=v; save(); after&&after(); renderParent(); }; box.appendChild(b); } };
+  onoff($('#autoSeg'), 'autoJudge', ()=>{ Recog.blocked=false; });
+  onoff($('#mirrorSeg'), 'mirror');
+  $('#autoStatus').textContent = !Recog.Ctor ? '이 브라우저는 음성 인식을 지원하지 않아서 부모님 판정으로 진행돼요.'
+    : Recog.blocked ? '음성 인식이 거부되었어요. 아이패드 설정에서 받아쓰기와 Safari의 음성 인식 허용을 확인해 주세요.'
+    : S.autoJudge ? '켜져 있어요. 판정 패널에 "들린 말"이 함께 보입니다.' : '꺼져 있어요. 부모님이 판정합니다.';
   micStatusText();
   renderCheers(); renderWords(); renderLog();
 }
@@ -1128,7 +1212,7 @@ function renderLog(){
     if (dk!==lastDay){ const h=document.createElement('div'); h.className='it'; h.innerHTML=`<b style="font-size:14px;color:var(--muted)">${dk}</b>`; rl.appendChild(h); lastDay=dk; }
     const d=document.createElement('div'); d.className='it';
     const mark = l.judge==='star'?'⭐':(l.judge==='more'?'🍴':'·');
-    d.innerHTML=`<span class="e">${mark}</span><span class="w">${l.word} <span class="tag">${l.attempt}번째 · ${new Date(l.t).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})}</span></span>`;
+    d.innerHTML=`<span class="e">${mark}</span><span class="w">${l.word} <span class="tag">${l.attempt}번째 · ${new Date(l.t).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})}${l.heard?` · 들린 말 "${l.heard.replace(/[<>&"]/g,'')}"`:''}${l.auto?' · 자동':''}</span></span>`;
     const p=document.createElement('button'); p.className='p-btn'; p.textContent='▶ 듣기'; p.onclick=async()=>{ ac(); playBlob(await DB.get('blobs',l.rec)); };
     d.append(p); rl.appendChild(d);
   }
