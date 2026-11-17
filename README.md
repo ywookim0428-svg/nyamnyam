@@ -5,4 +5,4 @@
 - 아이패드 Safari에서 열고 공유 → "홈 화면에 추가"
 - 부모님 화면: 오른쪽 위 "부모님"을 1.5초 꾹 누르기
 
-음성: [ElevenLabs](https://elevenlabs.io)로 만든 음성(Jessica)을 사용합니다.
+음성: [ElevenLabs](https://elevenlabs.io)로 만든 음성(Sarah, v3 모델)을 사용합니다.
